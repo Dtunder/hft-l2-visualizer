@@ -31,9 +31,15 @@ def generate_mock_book():
 def main():
     try:
         while True:
-            book = generate_mock_book()
-            print(json.dumps(book))
-            sys.stdout.flush()
+            try:
+                book = generate_mock_book()
+                print(json.dumps(book))
+                sys.stdout.flush()
+            except (TypeError, ValueError, IOError) as e:
+                print(f"Error generating or writing mock data: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"Unexpected error in mock stream: {e}", file=sys.stderr)
+
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass

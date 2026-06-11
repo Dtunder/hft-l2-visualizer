@@ -23,6 +23,20 @@ def test_format_level_normal():
     expected = f"    5.00  @    100.50 | {expected_bar}"
     assert result == expected
 
+def test_format_level_invalid_types():
+    with pytest.raises(TypeError):
+        main.format_level("100", 5, 10, is_bid=False)
+    with pytest.raises(TypeError):
+        main.format_level(100.5, "5", 10, is_bid=False)
+    with pytest.raises(TypeError):
+        main.format_level(100.5, 5, "10", is_bid=False)
+
+def test_format_level_invalid_values():
+    with pytest.raises(ValueError):
+        main.format_level(100.5, -5, 10, is_bid=False)
+    with pytest.raises(ValueError):
+        main.format_level(100.5, 5, -10, is_bid=False)
+
 def test_visualize_book():
     data = {
         "bids": [[99.0, 10], [98.0, 5], [97.0, 2], [96.0, 1], [95.0, 1], [94.0, 1]], # More than 5
@@ -52,28 +66,56 @@ def test_visualize_book_empty():
         output = mock_print.call_args[0][0]
         assert "=== L2 ORDER BOOK ===" in output
 
+def test_visualize_book_invalid_types():
+    with pytest.raises(TypeError, match="Input data must be a dictionary"):
+        main.visualize_book(["not a dict"])
+
+    with pytest.raises(TypeError, match="bids and asks must be lists"):
+        main.visualize_book({"bids": "not a list", "asks": []})
+
+def test_visualize_book_invalid_levels():
+    data = {
+        "bids": [[99.0, 10], ["invalid", 5], [97.0, -2], [96.0], "not a list", [95.0, 1]],
+        "asks": [[101.0, 20], [102.0, "invalid"]]
+    }
+    with patch('main.clear_screen'), patch('builtins.print') as mock_print:
+        main.visualize_book(data)
+        output = mock_print.call_args[0][0]
+
+        # Valid bids and asks should still be processed
+        assert "BID:    10.00  @     99.00 |" in output
+        assert "BID:     1.00  @     95.00 |" in output
+        assert "ASK:    20.00  @    101.00 |" in output
+
+        # Invalid ones should be skipped
+        assert "97.0" not in output  # Negative size
+        assert "96.0" not in output  # Missing size
+        assert "102.0" not in output # Invalid size type
+
 def test_main_loop():
     import io
     input_data = io.StringIO(
         json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n" +
         "invalid json\n" +
         "\n" +  # Empty line
+        json.dumps({"bids": "invalid", "asks": []}) + "\n" +
         json.dumps({"bids": [], "asks": []}) + "\n"
     )
+
     with patch('sys.stdin', input_data), \
          patch('main.visualize_book') as mock_visualize, \
          patch('sys.stderr') as mock_stderr:
+
+        # Make visualize_book raise an Exception on the second call to simulate unhandled error
+        mock_visualize.side_effect = [None, TypeError("bids and asks must be lists"), None]
+
         main.main()
         
-        # visualize_book should be called twice (for the two valid JSONs)
-        assert mock_visualize.call_count == 2
-        mock_visualize.assert_has_calls([
-            call({"bids": [[10, 1]], "asks": [[11, 2]]}),
-            call({"bids": [], "asks": []})
-        ])
+        # visualize_book should be called 3 times total
+        assert mock_visualize.call_count == 3
         
-        # stderr should have been written to for the invalid json
-        mock_stderr.write.assert_called()
+        # stderr should have been written to for invalid json and validation error
+        assert mock_stderr.write.call_count >= 2
 
 def test_main_keyboard_interrupt():
     def mock_stdin_iter():

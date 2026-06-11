@@ -56,3 +56,24 @@ def test_main_loop():
         data = json.loads(output)
         assert "asks" in data
         assert "bids" in data
+
+def test_main_loop_exceptions():
+    call_count = [0]
+
+    def sleep_side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] >= 3:
+            raise KeyboardInterrupt()
+
+    with patch('time.sleep', side_effect=sleep_side_effect), \
+         patch('mock_stream.generate_mock_book', side_effect=[
+             ValueError("Mock value error"),
+             Exception("Mock unexpected error"),
+             {"asks": [], "bids": []}
+         ]), \
+         patch('sys.stderr') as mock_stderr:
+
+        mock_stream.main()
+
+        # Errors should be caught and logged
+        assert mock_stderr.write.call_count >= 2
