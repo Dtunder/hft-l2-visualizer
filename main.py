@@ -8,6 +8,11 @@ def clear_screen():
     sys.stdout.flush()
 
 def format_level(price, size, max_size, is_bid):
+    if not isinstance(price, (int, float)) or not isinstance(size, (int, float)) or not isinstance(max_size, (int, float)):
+        raise TypeError("price, size, and max_size must be numeric")
+    if size < 0 or max_size < 0:
+        raise ValueError("size and max_size must be non-negative")
+
     # Calculate the bar length based on max size, max width is say 20 chars
     max_bar_len = 20
     if max_size == 0:
@@ -17,31 +22,40 @@ def format_level(price, size, max_size, is_bid):
     
     bar = "█" * bar_len
     
-    # Format string. Bids have bar on right, Asks have bar on left maybe?
-    # Actually let's just make it uniform: [Bar] [Size] @ [Price]
-    # For Asks: [Price] [Size] [Bar] (red?)
-    # For Bids: [Price] [Size] [Bar] (green?)
-    # Let's keep it simple without color for now, just ASCII
-    
-    # To make it look like an order book:
-    # Asks:  Size  Price | Bar
-    # Bids:  Size  Price | Bar
-    
     # Standard format: Size (8 chars) Price (8 chars) | Bar
-    
     return f"{size:8.2f}  @  {price:8.2f} | {bar}"
 
 def visualize_book(data):
-    # Data is expected to be a dict with 'bids' and 'asks' lists
-    # Each list contains [price, size]
+    if not isinstance(data, dict):
+        raise TypeError("Input data must be a dictionary")
     
-    bids = data.get('bids', [])
-    asks = data.get('asks', [])
+    raw_bids = data.get('bids', [])
+    raw_asks = data.get('asks', [])
+    
+    if not isinstance(raw_bids, list) or not isinstance(raw_asks, list):
+        raise TypeError("bids and asks must be lists")
+
+    def parse_levels(levels):
+        parsed = []
+        for item in levels:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    price = float(item[0])
+                    size = float(item[1])
+                    if price < 0 or size < 0:
+                        continue
+                    parsed.append([price, size])
+                except (ValueError, TypeError):
+                    continue
+        return parsed
+
+    bids = parse_levels(raw_bids)
+    asks = parse_levels(raw_asks)
     
     # Sort bids descending (highest price first)
-    bids = sorted(bids, key=lambda x: float(x[0]), reverse=True)[:5]
+    bids = sorted(bids, key=lambda x: x[0], reverse=True)[:5]
     # Sort asks ascending (lowest price first)
-    asks = sorted(asks, key=lambda x: float(x[0]))[:5]
+    asks = sorted(asks, key=lambda x: x[0])[:5]
     
     # To print order book, usually asks are on top (highest to lowest), then bids (highest to lowest)
     # Let's reverse asks to print highest ask at the top
@@ -84,6 +98,10 @@ def main():
                 visualize_book(data)
             except json.JSONDecodeError:
                 print(f"Failed to parse JSON: {line}", file=sys.stderr)
+            except (TypeError, ValueError) as e:
+                print(f"Data validation error: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"Unexpected error: {e}", file=sys.stderr)
     except KeyboardInterrupt:
         pass
 
