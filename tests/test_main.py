@@ -215,23 +215,55 @@ def test_main_loop_unexpected_error(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_get_config_defaults() -> None:
-    with patch.dict("os.environ", clear=True):
+    with patch.dict("os.environ", clear=True), patch(
+        "builtins.open", side_effect=FileNotFoundError
+    ):
         config = main.get_config()
         assert config["timeout"] == 5.0
         assert config["retries"] == 3
 
 
-def test_get_config_custom() -> None:
-    with patch.dict("os.environ", {"STREAM_TIMEOUT": "2.5", "STREAM_RETRIES": "5"}):
+def test_get_config_custom_env() -> None:
+    with patch.dict(
+        "os.environ", {"STREAM_TIMEOUT": "2.5", "STREAM_RETRIES": "5"}
+    ), patch("builtins.open", side_effect=FileNotFoundError):
         config = main.get_config()
         assert config["timeout"] == 2.5
         assert config["retries"] == 5
 
 
+def test_get_config_custom_json() -> None:
+    import json
+
+    mock_json = json.dumps({"STREAM_TIMEOUT": 1.5, "STREAM_RETRIES": 10})
+    from unittest.mock import mock_open
+
+    with patch.dict("os.environ", clear=True), patch(
+        "builtins.open", mock_open(read_data=mock_json)
+    ):
+        config = main.get_config()
+        assert config["timeout"] == 1.5
+        assert config["retries"] == 10
+
+
+def test_get_config_custom_json_env_override() -> None:
+    import json
+
+    mock_json = json.dumps({"STREAM_TIMEOUT": 1.5, "STREAM_RETRIES": 10})
+    from unittest.mock import mock_open
+
+    with patch.dict("os.environ", {"STREAM_TIMEOUT": "2.5"}), patch(
+        "builtins.open", mock_open(read_data=mock_json)
+    ):
+        config = main.get_config()
+        assert config["timeout"] == 2.5
+        assert config["retries"] == 10
+
+
 def test_get_config_invalid() -> None:
     with patch.dict(
         "os.environ", {"STREAM_TIMEOUT": "-1.0", "STREAM_RETRIES": "invalid"}
-    ):
+    ), patch("builtins.open", side_effect=FileNotFoundError):
         config = main.get_config()
         assert config["timeout"] == 5.0
         assert config["retries"] == 3

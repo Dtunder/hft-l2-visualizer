@@ -1,0 +1,6 @@
+{
+  "STREAM_TIMEOUT": 5.0,
+  "STREAM_RETRIES": 3,
+  "SIMULATE_FAILURE": false,
+  "UPDATE_INTERVAL": 0.5
+}

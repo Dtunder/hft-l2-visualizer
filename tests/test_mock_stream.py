@@ -108,6 +108,42 @@ def test_main_keyboard_interrupt(caplog: pytest.LogCaptureFixture) -> None:
         )
 
 
+def test_get_config_defaults() -> None:
+    with patch.dict("os.environ", clear=True), patch(
+        "builtins.open", side_effect=FileNotFoundError
+    ):
+        config = mock_stream.get_config()
+        assert config["stream_timeout"] == 5.0
+        assert config["simulate_failure"] is False
+        assert config["update_interval"] == 0.5
+
+
+def test_get_config_custom_json() -> None:
+    mock_json = json.dumps(
+        {"STREAM_TIMEOUT": 1.5, "SIMULATE_FAILURE": True, "UPDATE_INTERVAL": 1.0}
+    )
+    from unittest.mock import mock_open
+
+    with patch.dict("os.environ", clear=True), patch(
+        "builtins.open", mock_open(read_data=mock_json)
+    ):
+        config = mock_stream.get_config()
+        assert config["stream_timeout"] == 1.5
+        assert config["simulate_failure"] is True
+        assert config["update_interval"] == 1.0
+
+
+def test_get_config_custom_env() -> None:
+    with patch.dict(
+        "os.environ",
+        {"STREAM_TIMEOUT": "2.5", "SIMULATE_FAILURE": "true", "UPDATE_INTERVAL": "2.0"},
+    ), patch("builtins.open", side_effect=FileNotFoundError):
+        config = mock_stream.get_config()
+        assert config["stream_timeout"] == 2.5
+        assert config["simulate_failure"] is True
+        assert config["update_interval"] == 2.0
+
+
 def test_main_loop_simulate_failure_delay(caplog: pytest.LogCaptureFixture) -> None:
     import logging
 
@@ -124,6 +160,8 @@ def test_main_loop_simulate_failure_delay(caplog: pytest.LogCaptureFixture) -> N
         "mock_stream.generate_mock_book", return_value={"asks": [], "bids": []}
     ), patch(
         "builtins.print"
+    ), patch(
+        "builtins.open", side_effect=FileNotFoundError
     ):
 
         with caplog.at_level(logging.WARNING):
@@ -151,6 +189,8 @@ def test_main_loop_simulate_failure_malformed(caplog: pytest.LogCaptureFixture) 
         "builtins.print"
     ) as mock_print, patch(
         "sys.stdout"
+    ), patch(
+        "builtins.open", side_effect=FileNotFoundError
     ):
 
         with caplog.at_level(logging.WARNING):

@@ -11,6 +11,7 @@ import random
 import sys
 import logging
 import os
+from typing import Dict, Any
 from log_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -51,16 +52,70 @@ def generate_mock_book() -> dict:
     return {"asks": asks, "bids": bids}
 
 
+def get_config() -> Dict[str, Any]:
+    """
+    Reads configuration from config.json, environment variables with graceful fallbacks.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing configuration values.
+    """
+    config_file_data: Dict[str, Any] = {}
+    try:
+        with open("config.json", "r") as f:
+            config_file_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not load config.json: {e}, using defaults/env vars")
+
+    # STREAM_TIMEOUT
+    try:
+        stream_timeout_val = os.environ.get(
+            "STREAM_TIMEOUT", config_file_data.get("STREAM_TIMEOUT", 5.0)
+        )
+        stream_timeout = float(stream_timeout_val)
+        if stream_timeout <= 0:
+            raise ValueError("Timeout must be positive")
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Invalid STREAM_TIMEOUT: {e}, falling back to 5.0")
+        stream_timeout = 5.0
+
+    # SIMULATE_FAILURE
+    simulate_failure_val = os.environ.get(
+        "SIMULATE_FAILURE", config_file_data.get("SIMULATE_FAILURE", False)
+    )
+    if isinstance(simulate_failure_val, str):
+        simulate_failure = simulate_failure_val.lower() in ("true", "1", "yes")
+    else:
+        simulate_failure = bool(simulate_failure_val)
+
+    # UPDATE_INTERVAL
+    try:
+        update_interval_val = os.environ.get(
+            "UPDATE_INTERVAL", config_file_data.get("UPDATE_INTERVAL", 0.5)
+        )
+        update_interval = float(update_interval_val)
+        if update_interval <= 0:
+            raise ValueError("Interval must be positive")
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Invalid UPDATE_INTERVAL: {e}, falling back to 0.5")
+        update_interval = 0.5
+
+    return {
+        "stream_timeout": stream_timeout,
+        "simulate_failure": simulate_failure,
+        "update_interval": update_interval,
+    }
+
+
 def main() -> None:
     """
     Main execution loop to continuously generate and output mock order book data.
 
     This function sets up structured JSON logging to stderr. In an infinite loop,
     it generates a mock L2 order book, serializes it to a JSON string, and prints
-    it to standard output. A 0.5-second delay is introduced between each output
+    it to standard output. A configurable delay is introduced between each output
     to simulate a continuous, real-time data stream. Exceptions are caught and logged.
 
-    If the environment variable `SIMULATE_FAILURE` is set, it will randomly
+    If `SIMULATE_FAILURE` is set to true in config or env, it will randomly
     insert long delays to simulate network timeouts, or output malformed JSON
     to simulate data corruption.
 
@@ -70,11 +125,10 @@ def main() -> None:
     setup_logging()
     logger.info("Starting mock L2 order book stream generator")
 
-    simulate_failure = os.environ.get("SIMULATE_FAILURE", "").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    config = get_config()
+    simulate_failure = config["simulate_failure"]
+    update_interval = config["update_interval"]
+    stream_timeout = config["stream_timeout"]
 
     try:
         while True:
@@ -82,7 +136,7 @@ def main() -> None:
                 if simulate_failure and random.random() < 0.1:
                     # 10% chance to simulate a long network delay
                     logger.warning("Simulating network delay...")
-                    time.sleep(6.0)  # Longer than default 5.0s timeout
+                    time.sleep(stream_timeout + 1.0)  # Longer than configured timeout
                 elif simulate_failure and random.random() < 0.1:
                     # 10% chance to simulate malformed data
                     logger.warning("Simulating malformed data...")
@@ -101,7 +155,7 @@ def main() -> None:
             except Exception as e:
                 logger.error(f"Unexpected error in mock stream: {e}", exc_info=True)
 
-            time.sleep(0.5)
+            time.sleep(update_interval)
     except KeyboardInterrupt:
         logger.info("Mock stream generator shutting down gracefully")
 

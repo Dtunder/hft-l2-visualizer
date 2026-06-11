@@ -14,28 +14,42 @@ logger = logging.getLogger(__name__)
 
 def get_config() -> Dict[str, Any]:
     """
-    Reads configuration from environment variables with graceful fallbacks.
+    Reads configuration from config.json, environment variables with graceful fallbacks.
 
-    This function attempts to read 'STREAM_TIMEOUT' and 'STREAM_RETRIES'
-    from the environment. If they are missing or malformed, it falls back
-    to default values and logs a warning.
+    This function attempts to read configuration from 'config.json' first.
+    Then it checks environment variables 'STREAM_TIMEOUT' and 'STREAM_RETRIES'.
+    If they are missing or malformed, it falls back to default values and logs a warning.
 
     Returns:
         Dict[str, Any]: A dictionary containing 'timeout' (float) and 'retries' (int).
     """
+    # Load config.json if it exists
+    config_file_data: Dict[str, Any] = {}
     try:
-        timeout = float(os.environ.get("STREAM_TIMEOUT", "5.0"))
+        with open("config.json", "r") as f:
+            config_file_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not load config.json: {e}, using defaults/env vars")
+
+    try:
+        timeout_val = os.environ.get(
+            "STREAM_TIMEOUT", config_file_data.get("STREAM_TIMEOUT", 5.0)
+        )
+        timeout = float(timeout_val)
         if timeout <= 0:
             raise ValueError("Timeout must be positive")
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         logger.warning(f"Invalid STREAM_TIMEOUT: {e}, falling back to 5.0")
         timeout = 5.0
 
     try:
-        retries = int(os.environ.get("STREAM_RETRIES", "3"))
+        retries_val = os.environ.get(
+            "STREAM_RETRIES", config_file_data.get("STREAM_RETRIES", 3)
+        )
+        retries = int(retries_val)
         if retries < 0:
             raise ValueError("Retries cannot be negative")
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         logger.warning(f"Invalid STREAM_RETRIES: {e}, falling back to 3")
         retries = 3
 
