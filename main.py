@@ -1,6 +1,10 @@
 import sys
 import json
 import heapq
+import logging
+from log_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 def clear_screen():
     """Clears the terminal screen and moves the cursor to the top-left."""
@@ -107,6 +111,8 @@ def visualize_book(data):
 
 def main():
     """Main loop reading from stdin and visualizing real-time order books."""
+    setup_logging()
+    logger.info("Starting L2 order book visualizer")
     try:
         for line in sys.stdin:
             line = line.strip()
@@ -115,14 +121,15 @@ def main():
             try:
                 data = json.loads(line)
                 visualize_book(data)
+                logger.debug("Successfully visualized book update")
             except json.JSONDecodeError:
-                print(f"Failed to parse JSON: {line}", file=sys.stderr)
+                logger.error(f"Failed to parse JSON: {line}")
             except (TypeError, ValueError) as e:
-                print(f"Data validation error: {e}", file=sys.stderr)
+                logger.error(f"Data validation error: {e}", exc_info=True)
             except Exception as e:
-                print(f"Unexpected error: {e}", file=sys.stderr)
+                logger.error(f"Unexpected error: {e}", exc_info=True)
     except KeyboardInterrupt:
-        pass
+        logger.info("Visualizer shutting down gracefully")
 
 if __name__ == "__main__":
     main()

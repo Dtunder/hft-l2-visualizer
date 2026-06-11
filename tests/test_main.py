@@ -92,8 +92,9 @@ def test_visualize_book_invalid_levels():
         assert "96.0" not in output  # Missing size
         assert "102.0" not in output # Invalid size type
 
-def test_main_loop():
+def test_main_loop(caplog):
     import io
+    import logging
     input_data = io.StringIO(
         json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n" +
         "invalid json\n" +
@@ -103,21 +104,23 @@ def test_main_loop():
     )
     
     with patch('sys.stdin', input_data), \
-         patch('main.visualize_book') as mock_visualize, \
-         patch('sys.stderr') as mock_stderr:
+         patch('main.visualize_book') as mock_visualize:
          
         # Make visualize_book raise an Exception on the second call to simulate unhandled error
         mock_visualize.side_effect = [None, TypeError("bids and asks must be lists"), None]
          
-        main.main()
+        with caplog.at_level(logging.ERROR):
+            main.main()
         
         # visualize_book should be called 3 times total
         assert mock_visualize.call_count == 3
         
-        # stderr should have been written to for invalid json and validation error
-        assert mock_stderr.write.call_count >= 2
+        # Check logs for invalid json and validation error
+        assert any("Failed to parse JSON" in record.message for record in caplog.records)
+        assert any("Data validation error" in record.message for record in caplog.records)
 
-def test_main_keyboard_interrupt():
+def test_main_keyboard_interrupt(caplog):
+    import logging
     def mock_stdin_iter():
         yield json.dumps({"bids": [], "asks": []}) + "\n"
         raise KeyboardInterrupt()
@@ -128,7 +131,27 @@ def test_main_keyboard_interrupt():
 
     with patch('sys.stdin', MockStdin()), \
          patch('main.visualize_book') as mock_visualize:
-        # main() should gracefully exit on KeyboardInterrupt
-        main.main()
+        
+        with caplog.at_level(logging.INFO):
+            # main() should gracefully exit on KeyboardInterrupt
+            main.main()
         
         assert mock_visualize.call_count == 1
+        assert any("Visualizer shutting down gracefully" in record.message for record in caplog.records)
+
+def test_main_loop_unexpected_error(caplog):
+    import io
+    import logging
+    input_data = io.StringIO(
+        json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n"
+    )
+    
+    with patch('sys.stdin', input_data), \
+         patch('main.visualize_book') as mock_visualize:
+         
+        mock_visualize.side_effect = Exception("Unexpected")
+         
+        with caplog.at_level(logging.ERROR):
+            main.main()
+        
+        assert any("Unexpected error" in record.message for record in caplog.records)

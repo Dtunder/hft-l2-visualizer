@@ -57,7 +57,8 @@ def test_main_loop():
         assert "asks" in data
         assert "bids" in data
 
-def test_main_loop_exceptions():
+def test_main_loop_exceptions(caplog):
+    import logging
     call_count = [0]
     
     def sleep_side_effect(*args, **kwargs):
@@ -70,10 +71,22 @@ def test_main_loop_exceptions():
              ValueError("Mock value error"),
              Exception("Mock unexpected error"),
              {"asks": [], "bids": []}
-         ]), \
-         patch('sys.stderr') as mock_stderr:
+         ]):
          
-        mock_stream.main()
+        with caplog.at_level(logging.ERROR):
+            mock_stream.main()
         
         # Errors should be caught and logged
-        assert mock_stderr.write.call_count >= 2
+        assert any("Error generating or writing mock data" in record.message for record in caplog.records)
+        assert any("Unexpected error in mock stream" in record.message for record in caplog.records)
+
+def test_main_keyboard_interrupt(caplog):
+    import logging
+    with patch('time.sleep', side_effect=KeyboardInterrupt()), \
+         patch('mock_stream.generate_mock_book', return_value={"asks": [], "bids": []}), \
+         patch('builtins.print'):
+        
+        with caplog.at_level(logging.INFO):
+            mock_stream.main()
+        
+        assert any("Mock stream generator shutting down gracefully" in record.message for record in caplog.records)

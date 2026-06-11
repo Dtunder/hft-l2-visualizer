@@ -9,6 +9,10 @@ import json
 import time
 import random
 import sys
+import logging
+from log_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 def generate_mock_book():
     """
@@ -47,20 +51,23 @@ def main():
     Main loop to continuously generate and output mock order books.
     Outputs JSON lines to standard output every 0.5 seconds.
     """
+    setup_logging()
+    logger.info("Starting mock L2 order book stream generator")
     try:
         while True:
             try:
                 book = generate_mock_book()
                 print(json.dumps(book))
                 sys.stdout.flush()
+                logger.debug("Successfully generated and output mock book")
             except (TypeError, ValueError, IOError) as e:
-                print(f"Error generating or writing mock data: {e}", file=sys.stderr)
+                logger.error(f"Error generating or writing mock data: {e}", exc_info=True)
             except Exception as e:
-                print(f"Unexpected error in mock stream: {e}", file=sys.stderr)
+                logger.error(f"Unexpected error in mock stream: {e}", exc_info=True)
             
             time.sleep(0.5)
     except KeyboardInterrupt:
-        pass
+        logger.info("Mock stream generator shutting down gracefully")
 
 if __name__ == "__main__":
     main()
