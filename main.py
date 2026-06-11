@@ -2,9 +2,127 @@ import sys
 import json
 import heapq
 import logging
+import os
+import threading
+import queue
+from typing import TextIO, Iterator, Dict, Any, Optional
+
 from log_config import setup_logging
 
 logger = logging.getLogger(__name__)
+
+
+def get_config() -> Dict[str, Any]:
+    """
+    Reads configuration from environment variables with graceful fallbacks.
+
+    This function attempts to read 'STREAM_TIMEOUT' and 'STREAM_RETRIES'
+    from the environment. If they are missing or malformed, it falls back
+    to default values and logs a warning.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing 'timeout' (float) and 'retries' (int).
+    """
+    try:
+        timeout = float(os.environ.get("STREAM_TIMEOUT", "5.0"))
+        if timeout <= 0:
+            raise ValueError("Timeout must be positive")
+    except ValueError as e:
+        logger.warning(f"Invalid STREAM_TIMEOUT: {e}, falling back to 5.0")
+        timeout = 5.0
+
+    try:
+        retries = int(os.environ.get("STREAM_RETRIES", "3"))
+        if retries < 0:
+            raise ValueError("Retries cannot be negative")
+    except ValueError as e:
+        logger.warning(f"Invalid STREAM_RETRIES: {e}, falling back to 3")
+        retries = 3
+
+    return {"timeout": timeout, "retries": retries}
+
+
+class ResilientStreamReader:
+    """
+    A stream reader that incorporates resilience by handling timeouts and retries.
+
+    This class reads from the provided stream in a background thread and places
+    lines into a queue. If no data is read within the specified timeout, it will
+    retry up to the configured number of times before ultimately stopping.
+    """
+
+    def __init__(self, stream: TextIO, timeout: float = 5.0, retries: int = 3) -> None:
+        """
+        Initializes the ResilientStreamReader.
+
+        Args:
+            stream (TextIO): The input text stream to read from.
+            timeout (float): The maximum time in seconds to wait for a line.
+            retries (int): The maximum number of consecutive timeouts allowed.
+        """
+        self.stream: TextIO = stream
+        self.timeout: float = timeout
+        self.max_retries: int = retries
+        self.queue: queue.Queue = queue.Queue()
+        self.stop_event: threading.Event = threading.Event()
+        self.thread: threading.Thread = threading.Thread(
+            target=self._read_loop, daemon=True
+        )
+        self.thread.start()
+
+    def _read_loop(self) -> None:
+        """
+        The background loop that continuously reads lines from the stream.
+
+        Returns:
+            None
+        """
+        try:
+            for line in self.stream:
+                if self.stop_event.is_set():
+                    break
+                self.queue.put(line)
+        except Exception as e:
+            logger.error(f"Stream read error: {e}")
+        finally:
+            self.queue.put(None)  # EOF marker
+
+    def __iter__(self) -> Iterator[str]:
+        """
+        Iterates over lines from the stream, respecting timeouts and retries.
+
+        Yields:
+            str: The next line from the stream.
+
+        Returns:
+            None
+        """
+        retries_left = self.max_retries
+        while not self.stop_event.is_set():
+            try:
+                line: Optional[str] = self.queue.get(timeout=self.timeout)
+                if line is None:
+                    break
+                retries_left = self.max_retries  # Reset retries on successful read
+                yield line
+            except queue.Empty:
+                if retries_left > 0:
+                    logger.warning(
+                        f"Stream read timeout. Retrying... ({retries_left} left)"
+                    )
+                    retries_left -= 1
+                else:
+                    logger.error("Max retries reached due to stream timeout. Exiting.")
+                    break
+
+    def stop(self) -> None:
+        """
+        Signals the background reader to stop and exit.
+
+        Returns:
+            None
+        """
+        self.stop_event.set()
 
 
 def clear_screen() -> None:
@@ -22,9 +140,7 @@ def clear_screen() -> None:
     sys.stdout.flush()
 
 
-def format_level(
-    price: float, size: float, max_size: float, is_bid: bool
-) -> str:
+def format_level(price: float, size: float, max_size: float, is_bid: bool) -> str:
     """
     Formats a single price level for text visualization.
 
@@ -122,16 +238,8 @@ def visualize_book(data: dict) -> None:
         raise TypeError("bids and asks must be lists")
 
     # Use list comprehension to parse efficiently
-    bids = [
-        parsed
-        for item in raw_bids
-        if (parsed := _parse_level(item)) is not None
-    ]
-    asks = [
-        parsed
-        for item in raw_asks
-        if (parsed := _parse_level(item)) is not None
-    ]
+    bids = [parsed for item in raw_bids if (parsed := _parse_level(item)) is not None]
+    asks = [parsed for item in raw_asks if (parsed := _parse_level(item)) is not None]
 
     # Get top 5 bids (highest price) using heapq.nlargest
     bids = heapq.nlargest(5, bids, key=lambda x: x[0])
@@ -156,8 +264,7 @@ def visualize_book(data: dict) -> None:
     # Print Asks
     for price, size in asks:
         output.append(
-            "ASK: "
-            + format_level(float(price), float(size), max_size, is_bid=False)
+            "ASK: " + format_level(float(price), float(size), max_size, is_bid=False)
         )
 
     output.append("-" * 40)
@@ -165,8 +272,7 @@ def visualize_book(data: dict) -> None:
     # Print Bids
     for price, size in bids:
         output.append(
-            "BID: "
-            + format_level(float(price), float(size), max_size, is_bid=True)
+            "BID: " + format_level(float(price), float(size), max_size, is_bid=True)
         )
 
     output.append("=====================")
@@ -181,17 +287,22 @@ def main() -> None:
     Main execution loop for reading from standard input and visualizing the order book.
 
     This function sets up structured JSON logging to stderr, then continually reads
-    JSON-formatted lines from standard input (`sys.stdin`). Each line is parsed and
-    visualized as an L2 order book. If the data is malformed or an error occurs, it is
-    logged appropriately and the loop continues until interrupted.
+    JSON-formatted lines from standard input (`sys.stdin`) using a resilient reader.
+    Each line is parsed and visualized as an L2 order book. If the data is malformed
+    or an error occurs, it is logged appropriately and the loop continues until interrupted.
 
     Returns:
         None
     """
     setup_logging()
     logger.info("Starting L2 order book visualizer")
+    config = get_config()
+    reader = ResilientStreamReader(
+        sys.stdin, timeout=config["timeout"], retries=config["retries"]
+    )
+
     try:
-        for line in sys.stdin:
+        for line in reader:
             line = line.strip()
             if not line:
                 continue
@@ -207,6 +318,8 @@ def main() -> None:
                 logger.error(f"Unexpected error: {e}", exc_info=True)
     except KeyboardInterrupt:
         logger.info("Visualizer shutting down gracefully")
+    finally:
+        reader.stop()
 
 
 if __name__ == "__main__":

@@ -113,24 +113,29 @@ def test_visualize_book_invalid_levels() -> None:
 
 
 def test_main_loop(caplog: pytest.LogCaptureFixture) -> None:
-    import io
     import logging
 
-    input_data = io.StringIO(
-        json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]})
-        + "\n"
-        + "invalid json\n"
-        + "\n"  # Empty line
-        + json.dumps({"bids": "invalid", "asks": []})
-        + "\n"
-        + json.dumps({"bids": [], "asks": []})
-        + "\n"
-    )
+    lines = [
+        json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n",
+        "invalid json\n",
+        "\n",  # Empty line
+        json.dumps({"bids": "invalid", "asks": []}) + "\n",
+        json.dumps({"bids": [], "asks": []}) + "\n",
+    ]
 
-    with patch("sys.stdin", input_data), patch(
+    class MockReader:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __iter__(self):
+            return iter(lines)
+
+        def stop(self):
+            pass
+
+    with patch("main.ResilientStreamReader", MockReader), patch(
         "main.visualize_book"
     ) as mock_visualize:
-
         # Make visualize_book raise an Exception on the second call to simulate unhandled error
         mock_visualize.side_effect = [
             None,
@@ -146,35 +151,37 @@ def test_main_loop(caplog: pytest.LogCaptureFixture) -> None:
 
         # Check logs for invalid json and validation error
         assert any(
-            "Failed to parse JSON" in record.message
-            for record in caplog.records
+            "Failed to parse JSON" in record.message for record in caplog.records
         )
         assert any(
-            "Data validation error" in record.message
-            for record in caplog.records
+            "Data validation error" in record.message for record in caplog.records
         )
 
 
 def test_main_keyboard_interrupt(caplog: pytest.LogCaptureFixture) -> None:
     import logging
 
-    def mock_stdin_iter():
-        yield json.dumps({"bids": [], "asks": []}) + "\n"
-        raise KeyboardInterrupt()
+    class MockReader:
+        def __init__(self, *args, **kwargs):
+            self.stopped = False
 
-    class MockStdin:
         def __iter__(self):
-            return mock_stdin_iter()
+            yield json.dumps({"bids": [], "asks": []}) + "\n"
+            raise KeyboardInterrupt()
 
-    with patch("sys.stdin", MockStdin()), patch(
+        def stop(self):
+            self.stopped = True
+
+    mock_reader = MockReader()
+
+    with patch("main.ResilientStreamReader", return_value=mock_reader), patch(
         "main.visualize_book"
     ) as mock_visualize:
-
         with caplog.at_level(logging.INFO):
-            # main() should gracefully exit on KeyboardInterrupt
             main.main()
 
         assert mock_visualize.call_count == 1
+        assert mock_reader.stopped
         assert any(
             "Visualizer shutting down gracefully" in record.message
             for record in caplog.records
@@ -182,22 +189,110 @@ def test_main_keyboard_interrupt(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_main_loop_unexpected_error(caplog: pytest.LogCaptureFixture) -> None:
-    import io
     import logging
 
-    input_data = io.StringIO(
-        json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n"
-    )
+    lines = [json.dumps({"bids": [[10, 1]], "asks": [[11, 2]]}) + "\n"]
 
-    with patch("sys.stdin", input_data), patch(
+    class MockReader:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __iter__(self):
+            return iter(lines)
+
+        def stop(self):
+            pass
+
+    with patch("main.ResilientStreamReader", MockReader), patch(
         "main.visualize_book"
     ) as mock_visualize:
-
         mock_visualize.side_effect = Exception("Unexpected")
 
         with caplog.at_level(logging.ERROR):
             main.main()
 
-        assert any(
-            "Unexpected error" in record.message for record in caplog.records
-        )
+        assert any("Unexpected error" in record.message for record in caplog.records)
+
+
+def test_get_config_defaults() -> None:
+    with patch.dict("os.environ", clear=True):
+        config = main.get_config()
+        assert config["timeout"] == 5.0
+        assert config["retries"] == 3
+
+
+def test_get_config_custom() -> None:
+    with patch.dict("os.environ", {"STREAM_TIMEOUT": "2.5", "STREAM_RETRIES": "5"}):
+        config = main.get_config()
+        assert config["timeout"] == 2.5
+        assert config["retries"] == 5
+
+
+def test_get_config_invalid() -> None:
+    with patch.dict(
+        "os.environ", {"STREAM_TIMEOUT": "-1.0", "STREAM_RETRIES": "invalid"}
+    ):
+        config = main.get_config()
+        assert config["timeout"] == 5.0
+        assert config["retries"] == 3
+
+
+def test_resilient_stream_reader_normal() -> None:
+    import io
+    import time
+
+    class DummyStream(io.StringIO):
+        def __init__(self, data):
+            super().__init__(data)
+            self.lines = data.splitlines(keepends=True)
+            self.idx = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.idx < len(self.lines):
+                # Small sleep to ensure thread switching
+                time.sleep(0.01)
+                line = self.lines[self.idx]
+                self.idx += 1
+                return line
+            raise StopIteration
+
+    stream = DummyStream("line1\nline2\nline3\n")
+    reader = main.ResilientStreamReader(stream, timeout=1.0, retries=1)
+
+    result = list(reader)
+    assert result == ["line1\n", "line2\n", "line3\n"]
+    reader.stop()
+
+
+def test_resilient_stream_reader_timeout(caplog) -> None:
+    import io
+    import time
+    import logging
+
+    class SlowStream(io.StringIO):
+        def __init__(self):
+            super().__init__()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            # Hang forever to trigger timeout
+            time.sleep(10)
+            raise StopIteration
+
+    stream = SlowStream()
+    # Fast timeout to trigger failure quickly
+    reader = main.ResilientStreamReader(stream, timeout=0.1, retries=1)
+
+    with caplog.at_level(logging.WARNING):
+        result = list(reader)
+
+    assert result == []
+    assert any("Stream read timeout. Retrying" in r.message for r in caplog.records)
+    assert any("Max retries reached" in r.message for r in caplog.records)
+
+    reader.stop()

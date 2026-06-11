@@ -10,6 +10,7 @@ import time
 import random
 import sys
 import logging
+import os
 from log_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -59,27 +60,46 @@ def main() -> None:
     it to standard output. A 0.5-second delay is introduced between each output
     to simulate a continuous, real-time data stream. Exceptions are caught and logged.
 
+    If the environment variable `SIMULATE_FAILURE` is set, it will randomly
+    insert long delays to simulate network timeouts, or output malformed JSON
+    to simulate data corruption.
+
     Returns:
         None
     """
     setup_logging()
     logger.info("Starting mock L2 order book stream generator")
+
+    simulate_failure = os.environ.get("SIMULATE_FAILURE", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
     try:
         while True:
             try:
-                book = generate_mock_book()
-                print(json.dumps(book))
-                sys.stdout.flush()
-                logger.debug("Successfully generated and output mock book")
+                if simulate_failure and random.random() < 0.1:
+                    # 10% chance to simulate a long network delay
+                    logger.warning("Simulating network delay...")
+                    time.sleep(6.0)  # Longer than default 5.0s timeout
+                elif simulate_failure and random.random() < 0.1:
+                    # 10% chance to simulate malformed data
+                    logger.warning("Simulating malformed data...")
+                    print('{"asks": [[100, "bad_size"]], "bids": "missing_data"')
+                    sys.stdout.flush()
+                else:
+                    book = generate_mock_book()
+                    print(json.dumps(book))
+                    sys.stdout.flush()
+                    logger.debug("Successfully generated and output mock book")
             except (TypeError, ValueError, IOError) as e:
                 logger.error(
                     f"Error generating or writing mock data: {e}",
                     exc_info=True,
                 )
             except Exception as e:
-                logger.error(
-                    f"Unexpected error in mock stream: {e}", exc_info=True
-                )
+                logger.error(f"Unexpected error in mock stream: {e}", exc_info=True)
 
             time.sleep(0.5)
     except KeyboardInterrupt:

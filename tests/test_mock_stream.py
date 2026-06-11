@@ -106,3 +106,55 @@ def test_main_keyboard_interrupt(caplog: pytest.LogCaptureFixture) -> None:
             "Mock stream generator shutting down gracefully" in record.message
             for record in caplog.records
         )
+
+
+def test_main_loop_simulate_failure_delay(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    call_count = [0]
+
+    def sleep_side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            raise KeyboardInterrupt()
+
+    with patch.dict("os.environ", {"SIMULATE_FAILURE": "true"}), patch(
+        "random.random", return_value=0.05
+    ), patch("time.sleep", side_effect=sleep_side_effect), patch(
+        "mock_stream.generate_mock_book", return_value={"asks": [], "bids": []}
+    ), patch(
+        "builtins.print"
+    ):
+
+        with caplog.at_level(logging.WARNING):
+            mock_stream.main()
+
+        # It should have printed malformed data or simulated delay
+        assert any("Simulating network delay..." in r.message for r in caplog.records)
+        # Because we patched time.sleep to raise after delay
+
+
+def test_main_loop_simulate_failure_malformed(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    call_count = [0]
+
+    def sleep_side_effect(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] >= 1:
+            raise KeyboardInterrupt()
+
+    # Return 0.15 so first condition (delay) fails, second condition (malformed) succeeds
+    with patch.dict("os.environ", {"SIMULATE_FAILURE": "true"}), patch(
+        "random.random", side_effect=[0.15, 0.05]
+    ), patch("time.sleep", side_effect=sleep_side_effect), patch(
+        "builtins.print"
+    ) as mock_print, patch(
+        "sys.stdout"
+    ):
+
+        with caplog.at_level(logging.WARNING):
+            mock_stream.main()
+
+        assert any("Simulating malformed data..." in r.message for r in caplog.records)
+        mock_print.assert_called()
