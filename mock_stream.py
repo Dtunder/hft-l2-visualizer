@@ -1,9 +1,23 @@
+"""
+Mock stream generator for real-time L2 order book data.
+
+Generates random mock L2 order book updates in JSON format
+and prints them to standard output continuously.
+"""
+
 import json
 import time
 import random
 import sys
 
 def generate_mock_book():
+    """
+    Generates a mock L2 order book with 10 bids and 10 asks.
+    
+    Returns:
+        dict: A dictionary containing 'asks' and 'bids', where each
+              is a list of [price, size] float pairs.
+    """
     # Base price
     mid_price = 100.0
     
@@ -29,6 +43,10 @@ def generate_mock_book():
     }
 
 def main():
+    """
+    Main loop to continuously generate and output mock order books.
+    Outputs JSON lines to standard output every 0.5 seconds.
+    """
     try:
         while True:
             try:
