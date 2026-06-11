@@ -14,13 +14,18 @@ from log_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-def generate_mock_book():
+def generate_mock_book() -> dict:
     """
-    Generates a mock L2 order book with 10 bids and 10 asks.
+    Generates a mock L2 order book structure with 10 bids and 10 asks.
+    
+    This function creates a randomly populated L2 order book centered around
+    a base mid-price. It sequentially generates asks moving upwards in price
+    and bids moving downwards. The resulting structure mimics real-time market data.
     
     Returns:
-        dict: A dictionary containing 'asks' and 'bids', where each
-              is a list of [price, size] float pairs.
+        dict: A dictionary containing 'asks' and 'bids' keys. The value for each
+              key is a list of lists, where each inner list contains two float 
+              values representing `[price, size]`.
     """
     # Base price
     mid_price = 100.0
@@ -46,10 +51,17 @@ def generate_mock_book():
         "bids": bids
     }
 
-def main():
+def main() -> None:
     """
-    Main loop to continuously generate and output mock order books.
-    Outputs JSON lines to standard output every 0.5 seconds.
+    Main execution loop to continuously generate and output mock order book data.
+    
+    This function sets up structured JSON logging to stderr. In an infinite loop, 
+    it generates a mock L2 order book, serializes it to a JSON string, and prints 
+    it to standard output. A 0.5-second delay is introduced between each output 
+    to simulate a continuous, real-time data stream. Exceptions are caught and logged.
+    
+    Returns:
+        None
     """
     setup_logging()
     logger.info("Starting mock L2 order book stream generator")

@@ -6,16 +6,19 @@ from datetime import datetime
 class JSONFormatter(logging.Formatter):
     """
     Formatter that outputs JSON strings after parsing the LogRecord.
+    
+    This formatter is used to emit structured JSON logs, which include the timestamp,
+    logging level, logger name, message, and optional exception information.
     """
     def format(self, record: logging.LogRecord) -> str:
         """
-        Formats a log record as a JSON string.
+        Formats a logging record as a JSON-encoded string.
         
         Args:
-            record (logging.LogRecord): The log record to format.
+            record (logging.LogRecord): The log record containing all relevant logging information.
             
         Returns:
-            str: The JSON formatted log string.
+            str: A JSON-formatted string representing the log record.
         """
         log_data = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
@@ -29,12 +32,20 @@ class JSONFormatter(logging.Formatter):
             
         return json.dumps(log_data)
 
-def setup_logging(level=logging.INFO):
+def setup_logging(level: int = logging.INFO) -> None:
     """
     Sets up structured JSON logging to stderr for the root logger.
     
+    This function configures the root logger to output JSON-formatted log
+    messages to standard error stream (`sys.stderr`). This prevents the logs
+    from interfering with any standard output (`sys.stdout`) data streams.
+    
     Args:
-        level: The logging level to set (default: logging.INFO).
+        level (int): The logging level to set for the root logger. Defaults to `logging.INFO`.
+                     Accepts integer constants defined in the `logging` module.
+                     
+    Returns:
+        None
     """
     logger = logging.getLogger()
     logger.setLevel(level)
