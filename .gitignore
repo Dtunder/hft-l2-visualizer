@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 venv/
 .coverage
+test_summary_report.txt

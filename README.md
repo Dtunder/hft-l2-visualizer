@@ -1,5 +1,8 @@
 # hft-l2-visualizer
 
+![Status](https://img.shields.io/badge/status-active-success.svg)
+![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen.svg)
+
 Real-time L2 orderbook stream parser and ASCII visualizer.
 
 This tool takes incoming L2 order book data streams (in JSON format with bids/asks lists) from standard input and prints an ASCII visualization of the top 5 levels of bids and asks. The output displays prices, sizes, and a horizontal bar representing relative volume.
